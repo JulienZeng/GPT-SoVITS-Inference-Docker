@@ -371,7 +371,7 @@ if __name__ == "__main__":
     #===========================启动参数===========================
     parser = argparse.ArgumentParser(description="TTS Inference API")
     parser.add_argument("-s","--host", type=str, default="0.0.0.0", help="主机地址")
-    parser.add_argument("-p","--port", type=int, default=8001, help="端口")
+    parser.add_argument("-p","--port", type=int, default=8000, help="端口")
     parser.add_argument("-k","--key", type=str, default="", help="推理密钥")
     parser.add_argument("-c","--config", type=str, default="./GPT_SoVITS/configs/tts_infer.yaml", help="配置文件路径")
     parser.add_argument("-r","--ref_audio", type=str, default="./custom_refs", help="参考音频路径")
@@ -382,5 +382,10 @@ if __name__ == "__main__":
     port = args.port
     ref_audio_path = args.ref_audio
     pre_infer(args.config, ref_audio_path)
-    webbrowser.open(f"http://127.0.0.1:{port}")
+    open_browser = os.environ.get("GSVI_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
+    if open_browser:
+        try:
+            webbrowser.open(f"http://127.0.0.1:{port}")
+        except Exception as e:
+            print(f"打开浏览器失败: {e}")
     uvicorn.run(app=APP, host=host, port=port)
