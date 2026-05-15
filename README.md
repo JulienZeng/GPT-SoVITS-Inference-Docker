@@ -37,6 +37,30 @@ A Powerful Few-shot Voice Conversion and Text-to-Speech WebUI.<br><br>
 
 4. **WebUI Tools:** Integrated tools include voice accompaniment separation, automatic training set segmentation, Chinese ASR, and text labeling, assisting beginners in creating training datasets and GPT/SoVITS models.
 
+## Fork-specific runtime
+
+This fork does **not** use the upstream `webui.py` as its default entrypoint.
+
+- `gsvi.bat` starts `gsvi.py` on port `8000`.
+- `gsvi.py` serves both the inference API and the packaged Vue frontend in `gsvi_ui/`.
+- In addition to upstream base weights, this fork expects ready-to-run speaker packages under `models/<version>/<speaker>/`.
+
+Example speaker package layout:
+
+```text
+models/
+  v4/
+    anime-zh-demo/
+      model.ckpt
+      model.pth
+      reference_audios/
+        中文/
+          emotions/
+            【默认】你好.wav
+```
+
+Without speaker packages in `models/`, the service can start but cannot synthesize with the fork-specific speaker API.
+
 **Check out our [demo video](https://www.bilibili.com/video/BV12g4y1m7Uw) here!**
 
 Unseen speakers few-shot fine-tuning demo:
@@ -142,36 +166,59 @@ brew install ffmpeg
 
 ### Running GPT-SoVITS with Docker
 
+### Docker For This Fork (`gsvi.py`)
+
+The upstream Docker section below is aimed at the official WebUI workflow. For this fork, the runnable container should target `gsvi.py`.
+
+- The container should expose port `8000`.
+- The first startup should prepare the base dependency models required by inference:
+  - `GPT_SoVITS/pretrained_models`
+  - `GPT_SoVITS/text/G2PWModel`
+  - Python-side `nltk_data`
+  - Python-side `open_jtalk` dictionary
+- Actual speaker packages still need to be mounted into `models/<version>/<speaker>/`.
+- The provided `docker-compose.yaml` mounts `models`, `custom_refs`, `outputs`, `cache`, `GPT_SoVITS/pretrained_models`, and `GPT_SoVITS/text/G2PWModel` so model assets persist across rebuilds.
+
+Start it with:
+
+```bash
+docker compose up --build
+```
+
+If you are in mainland China, set `MODEL_SOURCE=HF-Mirror` or `MODEL_SOURCE=ModelScope` in `docker-compose.yaml` before the first run.
+
 #### Docker Image Selection
 
-Due to rapid development in the codebase and a slower Docker image release cycle, please:
+This repository now provides a single `gsvi` service in `docker-compose.yaml`.
 
-- Check [Docker Hub](https://hub.docker.com/r/xxxxrt666/gpt-sovits) for the latest available image tags
-- Choose an appropriate image tag for your environment
-- `Lite` means the Docker image **does not include** ASR models and UVR5 models. You can manually download the UVR5 models, while the program will automatically download the ASR models as needed
-- The appropriate architecture image (amd64/arm64) will be automatically pulled during Docker Compose
-- Docker Compose will mount **all files** in the current directory. Please switch to the project root directory and **pull the latest code** before using the Docker image
-- Optionally, build the image locally using the provided Dockerfile for the most up-to-date changes
+- The default base image is `nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04`
+- PyTorch is installed from the `cu128` index by default
+- If you need another mirror for model downloads, change `MODEL_SOURCE`
+- If you need another CUDA/PyTorch combination, edit the build args in `docker-compose.yaml`
 
 #### Environment Variables
 
 - `is_half`: Controls whether half-precision (fp16) is enabled. Set to `true` if your GPU supports it to reduce memory usage.
+- `GSVI_BOOTSTRAP_MODELS`: Whether to auto-download the base runtime models on container startup.
+- `GSVI_DOWNLOAD_G2PW`: Whether to auto-download `G2PWModel`.
+- `GSVI_DOWNLOAD_UVR5`: Whether to auto-download UVR5 weights.
+- `GSVI_OPEN_BROWSER`: Keep this `false` in containers.
+- `MODEL_SOURCE`: One of `HF`, `HF-Mirror`, or `ModelScope`.
 
 #### Shared Memory Configuration
 
-On Windows (Docker Desktop), the default shared memory size is small and may cause unexpected behavior. Increase `shm_size` (e.g., to `16g`) in your Docker Compose file based on your available system memory.
+On Windows (Docker Desktop), the default shared memory size is small and may cause unexpected behavior. Increase `shm_size` in `docker-compose.yaml` if needed. The provided compose file starts with `8g`.
 
 #### Choosing a Service
 
-The `docker-compose.yaml` defines two services:
+The `docker-compose.yaml` defines one runnable service:
 
-- `GPT-SoVITS-CU126` & `GPT-SoVITS-CU128`: Full version with all features.
-- `GPT-SoVITS-CU126-Lite` & `GPT-SoVITS-CU128-Lite`: Lightweight version with reduced dependencies and functionality.
+- `gsvi`: FastAPI + bundled Vue frontend, listening on port `8000`
 
-To run a specific service with Docker Compose, use:
+To start it:
 
 ```bash
-docker compose run --service-ports <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GPT-SoVITS-CU128>
+docker compose up --build gsvi
 ```
 
 #### Building the Docker Image Locally
@@ -179,7 +226,7 @@ docker compose run --service-ports <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|
 If you want to build the image yourself, use:
 
 ```bash
-bash docker_build.sh --cuda <12.6|12.8> [--lite]
+docker compose build gsvi
 ```
 
 #### Accessing the Running Container (Bash Shell)
@@ -187,10 +234,28 @@ bash docker_build.sh --cuda <12.6|12.8> [--lite]
 Once the container is running in the background, you can access it using:
 
 ```bash
-docker exec -it <GPT-SoVITS-CU126-Lite|GPT-SoVITS-CU128-Lite|GPT-SoVITS-CU126|GPT-SoVITS-CU128> bash
+docker exec -it gsvi bash
 ```
 
 ## Pretrained Models
+
+### Required Models For This Fork (`gsvi.py`)
+
+To make this fork runnable, split the required assets into two layers:
+
+1. **Base dependency models**
+   These are shared runtime dependencies and should exist even before you add any speaker package.
+   - `GPT_SoVITS/pretrained_models`
+   - `GPT_SoVITS/text/G2PWModel` for Chinese TTS
+   - `nltk_data` for English text processing
+   - `open_jtalk` dictionary for Japanese text processing
+
+2. **Speaker packages**
+   These are the fork-specific ready-to-run models used by `/models/{version}`, `/infer_single`, `/infer_multi`, and the OpenAI-compatible voice endpoint.
+   - Place them under `models/<version>/<speaker>/`
+   - Each speaker directory needs at least one `.ckpt`, one `.pth`, and usable reference audio files under `reference_audios/<language>/emotions/`
+
+The provided Docker entrypoint can automatically bootstrap the base dependency models on first startup. It does **not** auto-download your speaker packages, because those are business/project-specific.
 
 **If `install.sh` runs successfully, you may skip No.1,2,3**
 
