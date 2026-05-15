@@ -1,62 +1,68 @@
-ARG CUDA_VERSION=12.6
-ARG TORCH_BASE=full
+ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+FROM ${CUDA_IMAGE}
 
-FROM xxxxrt666/torch-base:cu${CUDA_VERSION}-${TORCH_BASE}
+LABEL maintainer="JulienZeng"
+LABEL description="Docker image for the GSVI inference fork of GPT-SoVITS"
 
-LABEL maintainer="XXXXRT"
-LABEL version="V4"
-LABEL description="Docker image for GPT-SoVITS"
+ARG TORCH_VERSION=2.7.0
+ARG TORCHAUDIO_VERSION=2.7.0
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
 
-ARG CUDA_VERSION=12.6
-
-ENV CUDA_VERSION=${CUDA_VERSION}
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/workspace/GPT-SoVITS
 
 SHELL ["/bin/bash", "-c"]
 
 WORKDIR /workspace/GPT-SoVITS
 
-COPY Docker /workspace/GPT-SoVITS/Docker/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    aria2 \
+    build-essential \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    git \
+    libgl1 \
+    libopencc-dev \
+    libsndfile1 \
+    libsndfile1-dev \
+    libsox-dev \
+    mecab \
+    mecab-ipadic-utf8 \
+    p7zip-full \
+    pkg-config \
+    python3 \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    sox \
+    tar \
+    unzip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-ARG LITE=false
-ENV LITE=${LITE}
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python && \
+    ln -sf /usr/bin/pip3 /usr/local/bin/pip
 
-ARG WORKFLOW=false
-ENV WORKFLOW=${WORKFLOW}
+COPY extra-req.txt requirements.txt /workspace/GPT-SoVITS/
 
-ARG TARGETPLATFORM
-ENV TARGETPLATFORM=${TARGETPLATFORM}
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    python -m pip install \
+    "torch==${TORCH_VERSION}" \
+    "torchaudio==${TORCHAUDIO_VERSION}" \
+    --index-url "${TORCH_INDEX_URL}" && \
+    python -m pip install -r extra-req.txt --no-deps && \
+    python -m pip install -r requirements.txt
 
-RUN bash Docker/miniconda_install.sh
+COPY . /app
 
-COPY extra-req.txt /workspace/GPT-SoVITS/
+RUN mkdir -p /workspace && \
+    rm -rf /workspace/GPT-SoVITS && \
+    mv /app /workspace/GPT-SoVITS && \
+    chmod +x /workspace/GPT-SoVITS/Docker/bootstrap_gsvi_assets.sh /workspace/GPT-SoVITS/Docker/entrypoint_gsvi.sh
 
-COPY requirements.txt /workspace/GPT-SoVITS/
+EXPOSE 8000
 
-COPY install.sh /workspace/GPT-SoVITS/
-
-RUN bash Docker/install_wrapper.sh
-
-EXPOSE 9871 9872 9873 9874 9880
-
-ENV PYTHONPATH="/workspace/GPT-SoVITS"
-
-RUN conda init bash && echo "conda activate base" >> ~/.bashrc
-
-WORKDIR /workspace
-
-RUN rm -rf /workspace/GPT-SoVITS
-
-WORKDIR /workspace/GPT-SoVITS
-
-COPY . /workspace/GPT-SoVITS
-
-CMD ["/bin/bash", "-c", "\
-  rm -rf /workspace/GPT-SoVITS/GPT_SoVITS/pretrained_models && \
-  rm -rf /workspace/GPT-SoVITS/GPT_SoVITS/text/G2PWModel && \
-  rm -rf /workspace/GPT-SoVITS/tools/asr/models && \
-  rm -rf /workspace/GPT-SoVITS/tools/uvr5/uvr5_weights && \
-  ln -s /workspace/models/pretrained_models /workspace/GPT-SoVITS/GPT_SoVITS/pretrained_models && \
-  ln -s /workspace/models/G2PWModel /workspace/GPT-SoVITS/GPT_SoVITS/text/G2PWModel && \
-  ln -s /workspace/models/asr_models /workspace/GPT-SoVITS/tools/asr/models && \
-  ln -s /workspace/models/uvr5_weights /workspace/GPT-SoVITS/tools/uvr5/uvr5_weights && \
-  exec bash"]
+ENTRYPOINT ["/workspace/GPT-SoVITS/Docker/entrypoint_gsvi.sh"]
